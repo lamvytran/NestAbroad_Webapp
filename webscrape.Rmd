@@ -1,0 +1,495 @@
+---
+title: "DBA Proj- Wm"
+output: html_document
+date: "2023-03-29"
+---
+
+For this project, we assume that the exchange rate are as follows:
+1 CAD is 0.98 SGD
+
+# Web Scrapping of On-campus Data
+## Orchard Commons
+```{r}
+library(XML)
+library(curl)
+library(tidyverse)
+theurl<-"https://vancouver.housing.ubc.ca/applications/fees-payments/orchard-commons/"
+url <- curl(theurl)
+urldata<-readLines(url)
+data<-readHTMLTable(urldata,stringAsFactors=FALSE)
+
+oc_fees <- as.data.frame(data[1]) %>% drop_na()
+colnames(oc_fees) <- c("Room.Type", "Room", "Meal.Plan", "Total")
+oc_fees$Type <- "Winter Session Contract"
+oc_fees$Type[c(5,6,7,8)] <- "Term 1 Only"
+oc_fees$Type[c(9,10,11,12)] <- "Term 2 Only"
+
+#remove additional indications
+oc_fees$Room.Type <- gsub("\\*", "", oc_fees$Room.Type)
+
+#change price related columns to numeric
+oc_fees$Room <- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", oc_fees$Room)))
+
+oc_fees$Meal.Plan <- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", oc_fees$Meal.Plan)))
+
+oc_fees$Room <- as.numeric(oc_fees$Room)
+oc_fees$Meal.Plan <- as.numeric(oc_fees$Meal.Plan)
+
+#change the currency
+oc_fees$Room <- oc_fees$Room/ 0.98
+oc_fees$Meal.Plan <- oc_fees$Meal.Plan/ 0.98
+
+oc_fees$Total <- oc_fees$Room + oc_fees$Meal.Plan
+oc_fees$Accom <- "Orchard Commons"
+
+#final dataframe
+head(oc_fees, 5)
+```
+
+## Place Vanier
+```{r}
+theurl<-"https://vancouver.housing.ubc.ca/applications/fees-payments/place-vanier/"
+url <- curl(theurl)
+urldata<-readLines(url)
+data<-readHTMLTable(urldata,stringAsFactors=FALSE)
+
+pv_fees <- as.data.frame(data[1]) %>% drop_na()
+colnames(pv_fees) <- c("Room.Type", "Room", "Meal.Plan", "Total")
+
+pv_fees$Type <- "Winter Session Contract"
+pv_fees$Type[c(6,7,8,9,10)] <- "Term 1 Only"
+pv_fees$Type[c(11,12,13,14,15)] <- "Term 2 Only"
+
+#change price related columns to numeric
+pv_fees$Room <- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", pv_fees$Room)))
+
+pv_fees$Meal.Plan <- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", pv_fees$Meal.Plan)))
+
+pv_fees$Room <- as.numeric(pv_fees$Room)
+pv_fees$Meal.Plan <- as.numeric(pv_fees$Meal.Plan)
+
+#change the currency
+pv_fees$Room <- pv_fees$Room/ 0.98
+pv_fees$Meal.Plan <- pv_fees$Meal.Plan/ 0.98
+
+pv_fees$Total <- pv_fees$Room + pv_fees$Meal.Plan
+pv_fees$Accom <- "Place Vanier"
+
+#final dataframe
+head(pv_fees, 5)
+
+```
+
+## Totem Park
+```{r}
+theurl<-"https://vancouver.housing.ubc.ca/applications/fees-payments/totem-park/"
+url <- curl(theurl)
+urldata<-readLines(url)
+data<-readHTMLTable(urldata,stringAsFactors=FALSE)
+  
+tp_fees <- as.data.frame(data[1]) %>% drop_na()
+colnames(tp_fees) <- c("Room.Type", "Room", "Meal.Plan", "Total")
+
+tp_fees$Type <- "Winter Session Contract"
+tp_fees$Type[12:22] <- "Term 1 Only"
+tp_fees$Type[23:33] <- "Term 2 Only"
+
+#change price related columns to numeric
+tp_fees$Room <- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", tp_fees$Room)))
+
+tp_fees$Meal.Plan <- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", tp_fees$Meal.Plan)))
+
+tp_fees$Room <- as.numeric(tp_fees$Room)
+tp_fees$Meal.Plan <- as.numeric(tp_fees$Meal.Plan)
+
+#change the currency
+tp_fees$Room <- tp_fees$Room/ 0.98
+tp_fees$Meal.Plan <- tp_fees$Meal.Plan/ 0.98
+
+tp_fees$Total <- tp_fees$Room + tp_fees$Meal.Plan
+
+#remove additional indications
+tp_fees$Room.Type <- gsub("\\*", "", tp_fees$Room.Type)
+
+tp_fees$Accom <- "Totem Park"
+
+#final dataframe
+head(tp_fees, 5)
+
+```
+
+## Brock Commons
+```{r}
+theurl<-"https://vancouver.housing.ubc.ca/applications/fees-payments/brock-commons-tallwood-house-fees/"
+url <- curl(theurl)
+urldata<-readLines(url)
+data<-readHTMLTable(urldata,stringAsFactors=FALSE)
+  
+bc_fees <- as.data.frame(data[1]) %>% drop_na() 
+
+bc_fees_cleaned <- bc_fees[4,2:3]
+
+colnames(bc_fees_cleaned) <- c("Studio.Suite", "4.Bedroom.Suite")
+
+bc_fees_cleaned <- gather(bc_fees_cleaned, key="Room.Type", value="Total")
+
+#change price related columns to numeric
+bc_fees_cleaned$Total <- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", bc_fees_cleaned$Total)))
+
+bc_fees_cleaned$Total <- as.numeric(bc_fees_cleaned$Total)
+
+#change the currency
+bc_fees_cleaned$Total <- bc_fees_cleaned$Total/ 0.98
+
+#remove additional indications
+bc_fees_cleaned$Room.Type <- gsub("\\.", " ", bc_fees_cleaned$Room.Type)
+bc_fees_cleaned$Accom <- "Brock Commons"
+
+#final dataframe
+head(bc_fees_cleaned, 5)
+
+```
+
+## Exchange
+```{r}
+theurl<-"https://vancouver.housing.ubc.ca/applications/fees-payments/exchange-fees/"
+url <- curl(theurl)
+urldata<-readLines(url)
+data<-readHTMLTable(urldata,stringAsFactors=FALSE)
+  
+exchange_fees <- as.data.frame(data[1]) %>% drop_na() 
+exchange_fees <- exchange_fees[4,]
+
+exchange_fees_cleaned <- gather(exchange_fees, key="Room.Type", value="Total")
+exchange_fees_cleaned <- exchange_fees_cleaned[2:7, ]
+
+#change price related columns to numeric
+exchange_fees_cleaned$Total <- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", exchange_fees_cleaned$Total)))
+
+exchange_fees_cleaned$Total <- as.numeric(exchange_fees_cleaned$Total)
+
+#change the currency
+exchange_fees_cleaned$Total <- exchange_fees_cleaned$Total/ 0.98
+
+#remove additional indications
+exchange_fees_cleaned$Room.Type <- gsub("\\.", " ", 
+                                  gsub("NULL.", "", exchange_fees_cleaned$Room.Type))
+
+exchange_fees_cleaned$Accom <- "Exchange"
+
+#final dataframe
+head(exchange_fees_cleaned, 5)
+
+```
+
+
+## Fairview Crescent
+```{r}
+theurl<-"https://vancouver.housing.ubc.ca/applications/fees-payments/fairview-crescent/"
+url <- curl(theurl)
+urldata<-readLines(url)
+data<-readHTMLTable(urldata,stringAsFactors=FALSE)
+  
+fc_fees <- as.data.frame(data[1]) %>% drop_na() 
+fc_fees <- fc_fees[c(4, 8, 10), -1]
+
+
+fc_fees_cleaned <- gather(fc_fees, key="Room.Type", value="Total")
+fc_fees_cleaned$Type <- c("Winter Session Contract", "Term 1 Only", "Term 2 Only")
+
+fc_fees_cleaned$Room.Type <- gsub("\\.", " ", 
+                                  gsub("NULL.", "", fc_fees_cleaned$Room.Type))
+
+#change price related columns to numeric
+fc_fees_cleaned$Total <- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", fc_fees_cleaned$Total)))
+
+fc_fees_cleaned$Total <- as.numeric(fc_fees_cleaned$Total)
+
+#change the currency
+fc_fees_cleaned$Total <- fc_fees_cleaned$Total/ 0.98
+
+fc_fees_cleaned$Accom <- "Fairview Crescent"
+
+#final dataframe
+head(fc_fees_cleaned, 5)
+
+```
+
+## Fraser Hall
+Only offers 1 type of Housing Type
+```{r}
+fh_fees <- as.data.frame(list(Room.Type = "Six Bedroom", Total=10802.82/0.98, Accom = "Fraser Hall"))
+```
+
+## Iona House
+```{r}
+theurl<-"https://vancouver.housing.ubc.ca/applications/fees-payments/iona-house-fees/"
+url <- curl(theurl)
+urldata<-readLines(url)
+data<-readHTMLTable(urldata,stringAsFactors=FALSE)
+  
+ih_fees <- as.data.frame(data[1]) %>% drop_na() 
+ih_fees <- ih_fees[4, -1]
+
+
+ih_fees_cleaned <- gather(ih_fees, key="Room.Type", value="Total")
+
+ih_fees_cleaned$Room.Type <- gsub("\\.", " ", 
+                                  gsub("NULL.", "", ih_fees_cleaned$Room.Type))
+
+#change price related columns to numeric
+ih_fees_cleaned$Total <- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", ih_fees_cleaned$Total)))
+
+ih_fees_cleaned$Total <- as.numeric(ih_fees_cleaned$Total)
+
+#change the currency
+ih_fees_cleaned$Total <- ih_fees_cleaned$Total/ 0.98
+
+ih_fees_cleaned$Accom <- "Iona House"
+
+#final dataframe
+head(ih_fees_cleaned, 5)
+
+```
+
+## Marine Drive 
+```{r}
+theurl<-"https://vancouver.housing.ubc.ca/applications/fees-payments/marine-drive/"
+url <- curl(theurl)
+urldata<-readLines(url)
+data<-readHTMLTable(urldata,stringAsFactors=FALSE)
+  
+md_fees <- as.data.frame(data[1]) %>% drop_na() 
+md_fees <- md_fees[4, -1]
+
+md_fees_cleaned <- gather(md_fees, key="Room.Type", value="Total")
+
+md_fees_cleaned$Room.Type <- gsub("\\.", " ", 
+                                  gsub("NULL.", "", md_fees_cleaned$Room.Type))
+
+#change price related columns to numeric
+md_fees_cleaned$Total <- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", md_fees_cleaned$Total)))
+
+md_fees_cleaned$Total <- as.numeric(md_fees_cleaned$Total)
+
+#change the currency
+md_fees_cleaned$Total <- md_fees_cleaned$Total/ 0.98
+
+md_fees_cleaned$Accom <- "Marine Drive"
+
+#final dataframe
+head(md_fees_cleaned, 5)
+
+```
+
+## Ponderosa Commons 
+```{r}
+theurl<-"https://vancouver.housing.ubc.ca/applications/fees-payments/ponderosa-commons/"
+url <- curl(theurl)
+urldata<-readLines(url)
+data<-readHTMLTable(urldata,stringAsFactors=FALSE)
+  
+pc_fees <- as.data.frame(data[1]) %>% drop_na() 
+pc_fees <- pc_fees[4, -1]
+
+pc_fees_cleaned <- gather(pc_fees, key="Room.Type", value="Total")
+
+pc_fees_cleaned$Room.Type <- gsub("\\.", " ", 
+                                  gsub("NULL.", "", pc_fees_cleaned$Room.Type))
+
+#change price related columns to numeric
+pc_fees_cleaned$Total <- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", pc_fees_cleaned$Total)))
+
+pc_fees_cleaned$Total <- as.numeric(pc_fees_cleaned$Total)
+
+#change the currency
+pc_fees_cleaned$Total <- pc_fees_cleaned$Total/ 0.98
+
+pc_fees_cleaned$Accom <- "Ponderosa Commons"
+
+#final dataframe
+head(pc_fees_cleaned, 5)
+
+```
+
+## The Houses of the Ones Belonging to the Saltwater
+```{r}
+theurl<-"https://vancouver.housing.ubc.ca/applications/fees-payments/houses-of-ones-belonging-to-saltwater-fees/"
+url <- curl(theurl)
+urldata<-readLines(url)
+data<-readHTMLTable(urldata,stringAsFactors=FALSE)
+  
+sw_fees <- as.data.frame(data[1]) %>% drop_na() 
+sw_fees <- sw_fees[4, -1]
+
+sw_fees_cleaned <- gather(sw_fees, key="Room.Type", value="Total")
+
+sw_fees_cleaned$Room.Type <- gsub("\\.", " ", 
+                                  gsub("NULL.", "", sw_fees_cleaned$Room.Type))
+
+#change price related columns to numeric
+sw_fees_cleaned$Total <- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", sw_fees_cleaned$Total)))
+
+sw_fees_cleaned$Total <- as.numeric(sw_fees_cleaned$Total)
+
+#change the currency
+sw_fees_cleaned$Total <- sw_fees_cleaned$Total/ 0.98
+
+sw_fees_cleaned$Accom <- "The Houses of the Ones Belonging to the Saltwater"
+
+#final dataframe
+head(sw_fees_cleaned, 5)
+
+```
+
+## Ritsumeikan-UBC House
+```{r}
+theurl<-"https://vancouver.housing.ubc.ca/applications/fees-payments/ritsumeiken-ubc/"
+url <- curl(theurl)
+urldata<-readLines(url)
+data<-readHTMLTable(urldata,stringAsFactors=FALSE)
+  
+r_fees <- as.data.frame(data[1]) %>% drop_na() 
+r_fees <- r_fees[c(4, 7, 8), -1]
+
+r_fees_cleaned <- gather(r_fees, key="Room.Type", value="Total")
+
+#add room type
+r_fees_cleaned$Type <- c("Winter Session Contract", "Term 1 Only", "Term 2 Only")
+
+r_fees_cleaned$Room.Type <- gsub("\\.", " ", 
+                                  gsub("NULL.", "", r_fees_cleaned$Room.Type))
+
+#change price related columns to numeric
+r_fees_cleaned$Total <- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", r_fees_cleaned$Total)))
+
+r_fees_cleaned$Total <- as.numeric(r_fees_cleaned$Total)
+
+#change the currency
+r_fees_cleaned$Total <- r_fees_cleaned$Total/ 0.98
+
+r_fees_cleaned$Accom <- "Ritsumeikan-UBC House"
+
+#final dataframe
+head(r_fees_cleaned, 5)
+
+```
+
+## Thunderbird
+```{r}
+theurl<-"https://vancouver.housing.ubc.ca/applications/fees-payments/thunderbird/"
+url <- curl(theurl)
+urldata<-readLines(url)
+data<-readHTMLTable(urldata,stringAsFactors=FALSE)
+  
+tb_fees <- as.data.frame(data[1]) %>% drop_na() 
+colnames(tb_fees) <- c("Room.Type", "Unit.Square.Foot", "Total")
+tb_fees <- tb_fees[-1,]
+#assumes that the prices are per student
+tb_fees$Total <- gsub("/person", "", tb_fees$Total)
+
+#clean the room size column 
+library(tidyverse)
+tb_fees <- tb_fees %>% separate(col=Unit.Square.Foot, into=c("Min.Unit.Square.Foot", "Max.Unit.Square.Foot"), sep="-")
+
+#change price related columns to numeric
+tb_fees$Total<- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", tb_fees$Total)))
+
+tb_fees$Total <- as.numeric(tb_fees$Total)
+
+#change the currency
+tb_fees$Total <- (tb_fees$Total/ 0.98)*12
+
+tb_fees$Accom <- "Thunderbird"
+
+#final dataframe
+head(tb_fees, 5)
+
+```
+
+## Walter Gage
+```{r}
+theurl<-"https://vancouver.housing.ubc.ca/applications/fees-payments/walter-gage/"
+url <- curl(theurl)
+urldata<-readLines(url)
+data<-readHTMLTable(urldata,stringAsFactors=FALSE)
+  
+wg_fees <- as.data.frame(data[1]) %>% drop_na() 
+wg_fees <- wg_fees[c(4, 8, 10), -1]
+
+wg_fees_cleaned <- gather(wg_fees, key="Room.Type", value="Total")
+
+#change price related columns to numeric
+wg_fees_cleaned$Total <- gsub("\\$" ,"", 
+                  gsub("\\.00", "", 
+                    gsub(",", "", wg_fees_cleaned$Total)))
+
+wg_fees_cleaned$Total <- as.numeric(wg_fees_cleaned$Total)
+
+#change the currency
+wg_fees_cleaned$Total <- wg_fees_cleaned$Total/ 0.98
+
+#clean room type col
+wg_fees_cleaned$Room.Type <- gsub("\\.", " ", 
+                                  gsub("NULL.", "", wg_fees_cleaned$Room.Type))
+wg_fees_cleaned$Type <- c("Winter Session Contract", "Term 1 Only", "Term 2 Only")
+
+wg_fees_cleaned$Accom <- "Walter Gage"
+  
+#final dataframe
+head(wg_fees_cleaned, 5)
+
+```
+
+# To compile all the Prices Data
+```{r}
+
+#a list of tables to merge
+tables_to_merge <- list(oc_fees, pv_fees, tp_fees, bc_fees_cleaned, exchange_fees_cleaned, fc_fees_cleaned, fh_fees, ih_fees_cleaned, md_fees_cleaned, pc_fees_cleaned, sw_fees_cleaned, r_fees_cleaned, tb_fees, wg_fees_cleaned)
+
+#use Reduce to iteratively merge the tables
+merged_table <- Reduce(function(x, y) merge(x, y, all = TRUE), tables_to_merge)
+
+#empty types are year round
+merged_table[is.na(merged_table$Type), ]$Type <- "Year Round"
+
+#compute the number of months
+mevrged_table$Months <- ifelse(merged_table$Type == "Year Round", 12, 
+                              ifelse(merged_table$Type == "Term 1 Only", 4, 
+                                     ifelse(merged_table$Type == "Term 2 Only", 4, 
+                                            ifelse(merged_table$Type == "Winter Session Contract", 8, NA))))
+
+#final prices table, export to csv
+write.csv(merged_table, "UBC_Prices_Complied.csv")
+```
+

@@ -1,0 +1,344 @@
+---
+title: "data_cleaning"
+author: "Zenon Sim"
+date: "2023-04-04"
+output: html_document
+---
+
+```{r loading-libraries, message = FALSE}
+library(data.table)
+library(dplyr)
+library(RColorBrewer)
+library(osmdata)
+library(readxl)
+library(geosphere)
+library(SPlit)
+library(tidyr)
+library(stringr)
+```
+
+```{r loading-datasets}
+listings = fread("./Raw Dataset/listings.csv.gz")
+supermarkets.data = read_xlsx('./Raw Dataset/Vancouver Supermarket Data.xlsx')
+attractions.data = read.csv('./Raw Dataset/hellobc-attractions-listing-20230320.csv')
+community.centres.data = read.csv('./Raw Dataset/community-centres.csv', sep = ';')
+hospitals.data = read_xlsx('./Raw Dataset/Vancouver Hospital Facilities.xlsx')
+transport.data = read.csv('./Raw Dataset/rapid-transit-stations.csv', sep =';')
+```
+
+```{r instantiate-school-coord}
+# Instantiating Lat-Long coordinates for UBC
+ubc.coord = list(49.2606, -123.2460)
+names(ubc.coord) = c("Latitude", "Longitude")
+
+schools = list(ubc.coord)
+names(schools) = "UBC"
+```
+
+```{r}
+reviews <- read.csv("./Raw Dataset/reviews.csv")
+
+#only keep reviews where the id is in listings
+reviews_filtered <- subset(reviews, listing_id %in% listings$id)
+
+#keep reviews from 2020 onwards 
+reviews_filtered$year <- substr(reviews_filtered$date, 1, 4)
+reviews_filtered <- reviews_filtered %>% filter(year >= "2020")
+
+#change year to factor 
+reviews_filtered$year <- as.factor(reviews_filtered$year)
+
+#final dataset 
+write.csv(reviews_filtered, file = "./Cleaned Dataset/reviews_filtered.csv")
+```
+
+```{r cleaning-listings, warnings = FALSE}
+# Trim listings dataset
+listings = listings %>% select(c('id', 'name', 'host_id', 'host_response_time', 'host_response_rate', 'host_acceptance_rate', 'host_is_superhost',
+                                                   'neighbourhood_cleansed', 'latitude', 'longitude', 'property_type', 'room_type', 'accommodates', 'bathrooms_text',
+                                                   'bedrooms', 'beds', 'amenities', 'price', 'minimum_nights', 'maximum_nights'))
+
+# Filter listings that allow for long stays
+listings <- listings[listings$maximum_nights >= 120, ]
+
+# Clean bathrooms.text
+listings$number_bathrooms = str_split_fixed(listings$bathrooms_text, ' ', 2)[,1]
+listings$number_bathrooms = as.numeric(listings$number_bathrooms)
+listings[is.na(listings$number_bathrooms), "number_bathrooms"] = 1 
+listings$number_bathrooms = round(listings$number_bathrooms, digits = 0)
+
+# Drop bathrooms_text
+listings = listings %>% select( -c("bathrooms_text"))
+
+# If bedrooms is na, get the max of num_bathrooms and beds
+listings$bedrooms <- ifelse(is.na(listings$bedrooms), apply(listings[, c("number_bathrooms", "beds")], 1, max, na.rm = TRUE), listings$bedrooms)
+
+# New col to indicate if overcrowded (yes is 1), our definition of overcrowding is more than 2 people per bedroom
+listings$max_accomodation <- listings$bedrooms * 2
+listings$overcrowded <- ifelse(listings$accommodates > listings$max_accomodation, 1, 0)
+
+# Remove rows that are overcrowded (new dataset)
+listings <- listings[listings$overcrowded == 0, ]
+listings = listings %>% select(-c("overcrowded"))
+
+# Change datatype for is_superhost
+listings$host_is_superhost <- ifelse(listings$host_is_superhost == "t", T, F)
+
+# Change all prices to SGD
+listings <- listings %>% 
+  mutate(price = as.numeric(gsub("\\$", "", price))) %>% # remove the $ sign and convert to numeric
+  mutate(price_sgd = price * 0.98) %>%
+  select(-price) %>%
+  rename(price = price_sgd)
+```
+
+```{r helper-function}
+# Define function to get distance between two latitudinal and longitudinal points
+getDistance = function(point1, point2){
+  return(as.numeric(distm(unlist(point1), unlist(point2), fun = distHaversine)))
+}
+```
+
+```{r school-distance}
+listings$distance_from_school = 0
+point2 = c(schools$UBC$Longitude, schools$UBC$Latitude)
+
+for (i in 1:nrow(listings)){
+  point1 = listings[i, c('longitude','latitude')]
+  listings[i, "distance_from_school"] = getDistance(point1, point2)
+}
+```
+
+
+```{r supermarket-information}
+# Checking how many supermarkets are within a 1km radius of the listing
+listings$supermarkets = 0
+listings$nearest_supermarket = ''
+listings$nearest_supermarket_dist = Inf
+
+for (i in 1:nrow(listings)){
+  point1 = listings[i, c('longitude','latitude')]
+  for (j in 1:nrow(supermarkets.data)){
+    point2 = supermarkets.data[j, c('lon', 'lat')]
+    distance = getDistance(point1, point2)
+    if (distance <= 1000){
+      listings[i, 'supermarkets'] = listings[i, 'supermarkets'] + 1
+    }
+    if (distance < listings[i, 'nearest_supermarket_dist']){
+      listings[i, "nearest_supermarket"] = supermarkets.data[j, "Supermarket Name"]
+      listings[i, 'nearest_supermarket_dist'] = distance
+    }
+  }
+}
+
+```
+
+```{r community-centre-information}
+# Clean community.centres.data
+community.centres.data[,c("lat", "lng")] = transpose(strsplit(community.centres.data$geo_point_2d, ", "))
+community.centres.data$lat = as.numeric(community.centres.data$lat)
+community.centres.data$lng = as.numeric(community.centres.data$lng)
+
+# Check the distance of the nearest community centre
+listings$nearest_community_centre = ''
+listings$nearest_community_centre_dist = Inf
+
+for (i in 1:nrow(listings)){
+  point1 = listings[i, c('longitude','latitude')]
+  for (j in 1:nrow(community.centres.data)){
+    point2 = community.centres.data[j, c('lng', 'lat')]
+    distance = getDistance(point1, point2)
+    if (distance <= listings[i, "nearest_community_centre_dist"]){
+      listings[i, "nearest_community_centre_dist"] = distance
+      listings[i, "nearest_community_centre"] = community.centres.data[j, "NAME"]
+    }
+  }
+}
+
+write.csv(community.centres.data, file = "./Cleaned Dataset/community_centres.csv")
+```
+
+```{r hospitals-information} 
+# Cleaning Hospital Data
+hospitals.data$`A&E Facility` = ifelse(hospitals.data$`A&E Facility` == 'Yes', TRUE, FALSE)
+
+# Check the distance of the nearest hospital
+listings$nearest_hospital = ''
+listings$nearest_hospital_dist = Inf
+listings$nearest_hospital_ane = NA
+
+for (i in 1:nrow(listings)){
+  point1 = listings[i, c('longitude','latitude')]
+  for (j in 1:nrow(hospitals.data)){
+    point2 = hospitals.data[j, c('longitude', 'latitude')]
+    distance = getDistance(point1, point2)
+    if (distance <= listings[i, "nearest_hospital_dist"]){
+      listings[i, "nearest_hospital_dist"] = distance
+      listings[i, "nearest_hospital_ane"] = hospitals.data[j, "A&E Facility"]
+      listings[i, "nearest_hospital"] = hospitals.data[j, "facility_name"]
+    }
+  }
+}
+```
+
+```{r transport-information}
+# Clean transport.data
+transport.data[,c("Latitude", "Longitude")] = transpose(strsplit(transport.data$geo_point_2d, ", "))
+transport.data$Latitude = as.numeric(transport.data$Latitude)
+transport.data$Longitude = as.numeric(transport.data$Longitude)
+
+# Check the distance of the nearest train station
+listings$nearest_train_station = ''
+listings$nearest_train_station_dist = Inf
+
+for (i in 1:nrow(listings)){
+  point1 = listings[i, c('longitude','latitude')]
+  for (j in 1:nrow(transport.data)){
+    point2 = transport.data[j, c('Longitude', 'Latitude')]
+    distance = getDistance(point1, point2)
+    if (distance <= listings[i, "nearest_train_station_dist"]){
+      listings[i, "nearest_train_station_dist"] = distance
+      listings[i, "nearest_train_station"] = transport.data[j, "STATION"]
+    }
+  }
+}
+```
+
+```{r}
+maxDist = max(listings$nearest_hospital_dist)
+minDist = min(listings$nearest_hospital_dist)
+bins = (maxDist - minDist) / 5
+listings$safety = 0 
+
+# Categorize the listings' safety rating according to the distance from hospital
+listings[listings$nearest_hospital_dist < (minDist+bins), "safety"] = 5
+listings[listings$nearest_hospital_dist >= (minDist+bins) & listings$nearest_hospital_dist < (minDist+bins*2), "safety"] = 4
+listings[listings$nearest_hospital_dist >= (minDist+bins*2) & listings$nearest_hospital_dist < (minDist+bins*3), "safety"] = 3
+listings[listings$nearest_hospital_dist >= (minDist+bins*3) & listings$nearest_hospital_dist < (minDist+bins*4), "safety"] = 2
+listings[listings$nearest_hospital_dist >= (minDist+bins*4), "safety"] = 1
+
+# Increment the ratings by 1 if the nearest hospital has A&E services
+listings[listings$nearest_hospital_ane == TRUE & listings$safety != 5, "safety"] = listings[listings$nearest_hospital_ane == TRUE & listings$safety != 5, "safety"] + 1
+```
+
+```{r}
+maxDist = max(listings$nearest_train_station_dist)
+minDist = min(listings$nearest_train_station_dist)
+
+bins = (maxDist - minDist) / 5
+listings$train_convenience = 0
+
+# Categorize the listings' train convenience rating according to the distance from nearest train station
+listings[listings$nearest_train_station_dist < (minDist+bins), "train_convenience"] = 5
+listings[listings$nearest_hospital_dist >= (minDist+bins) & listings$nearest_hospital_dist < (minDist+bins*2), "train_convenience"] = 4
+listings[listings$nearest_hospital_dist >= (minDist+bins*2) & listings$nearest_hospital_dist < (minDist+bins*3), "train_convenience"] = 3
+listings[listings$nearest_hospital_dist >= (minDist+bins*3) & listings$nearest_hospital_dist < (minDist+bins*4), "train_convenience"] = 2
+listings[listings$nearest_hospital_dist >= (minDist+bins*4), "train_convenience"] = 1
+
+```
+
+```{r}
+maxDist = max(listings$nearest_community_centre_dist)
+minDist = min(listings$nearest_community_centre_dist)
+
+bins = (maxDist - minDist) / 5
+listings$community_centre_convenience = 0
+
+# Categorize the listings' community centre convenience rating according to the distance from nearest community centre
+listings[listings$nearest_community_centre_dist < (minDist+bins), "community_centre_convenience"] = 5
+listings[listings$nearest_community_centre_dist >= (minDist+bins) & listings$nearest_community_centre_dist < (minDist+bins*2), "community_centre_convenience"] = 4
+listings[listings$nearest_community_centre_dist >= (minDist+bins*2) & listings$nearest_community_centre_dist < (minDist+bins*3), "community_centre_convenience"] = 3
+listings[listings$nearest_community_centre_dist >= (minDist+bins*3) & listings$nearest_community_centre_dist < (minDist+bins*4), "community_centre_convenience"] = 2
+listings[listings$nearest_community_centre_dist >= (minDist+bins*4), "community_centre_convenience"] = 1
+```
+
+```{r}
+maxDist = max(listings$nearest_supermarket_dist)
+minDist = min(listings$nearest_supermarket_dist)
+
+bins = (maxDist - minDist) / 5
+listings$supermarket_convenience = 0
+
+# Categorize the listings' supermarket convenience rating according to the distance from nearest supermarket
+listings[listings$nearest_supermarket_dist < (minDist+bins), "supermarket_convenience"] = 5
+listings[listings$nearest_supermarket_dist >= (minDist+bins) & listings$nearest_supermarket_dist < (minDist+bins*2), "supermarket_convenience"] = 4
+listings[listings$nearest_supermarket_dist >= (minDist+bins*2) & listings$nearest_supermarket_dist < (minDist+bins*3), "supermarket_convenience"] = 3
+listings[listings$nearest_supermarket_dist >= (minDist+bins*3) & listings$nearest_supermarket_dist < (minDist+bins*4), "supermarket_convenience"] = 2
+listings[listings$nearest_supermarket_dist >= (minDist+bins*4), "supermarket_convenience"] = 1
+```
+
+```{r}
+# Obtaining an overall convenience rating for the listings through averaging across
+listings$convenience = (listings$supermarket_convenience + listings$train_convenience + listings$community_centre_convenience) / 3
+```
+
+```{r}
+# Count the number of amenities
+listings$amenities_count = 0
+
+for (i in 1:nrow(listings)){
+  listings[i, "amenities_count"] = length(strsplit(listings[i, "amenities"][[1]], ",")[[1]])
+}
+```
+
+```{r}
+maxCount = max(listings$amenities_count)
+minCount = min(listings$amenities_count)
+
+bins = (maxCount - minCount) / 5
+listings$amenities_rating = 0
+
+# Categorize the listings' amenities rating according to the number of amenities
+listings[listings$amenities_count < (minCount+bins), "amenities_rating"] = 1
+listings[listings$amenities_count >= (minCount+bins) & listings$amenities_count < (minCount+bins*2), "amenities_rating"] = 2
+listings[listings$amenities_count >= (minCount+bins*2) & listings$amenities_count < (minCount+bins*3), "amenities_rating"] = 3
+listings[listings$amenities_count >= (minCount+bins*3) & listings$amenities_count < (minCount+bins*4), "amenities_rating"] = 4
+listings[listings$amenities_count >= (minCount+bins*4), "amenities_rating"] = 5
+```
+
+```{r}
+maxDist = max(listings$distance_from_school)
+minDist = min(listings$distance_from_school)
+
+bins = (maxDist - minDist) / 5
+listings$school_convenience = 0
+
+# Categorize the listings' school convenience rating according to the distance from school
+listings[listings$distance_from_school < (minDist+bins), "school_convenience"] = 5
+listings[listings$distance_from_school >= (minDist+bins) & listings$distance_from_school < (minDist+bins*2), "school_convenience"] = 4
+listings[listings$distance_from_school >= (minDist+bins*2) & listings$distance_from_school < (minDist+bins*3), "school_convenience"] = 3
+listings[listings$distance_from_school >= (minDist+bins*3) & listings$distance_from_school < (minDist+bins*4), "school_convenience"] = 2
+listings[listings$distance_from_school >= (minDist+bins*4), "school_convenience"] = 1
+```
+
+```{r}
+listings$response_rating = 0
+
+listings$host_response_rate = gsub("%", "", listings$host_response_rate)
+listings$host_response_rate = as.numeric(listings$host_response_rate)
+
+listings[is.na(listings$host_response_rate), "response_rating"] = 3
+
+maxRate = max(listings$host_response_rate, na.rm = TRUE)
+minRate = min(listings$host_response_rate, na.rm = TRUE)
+
+bins = (maxRate - minRate) / 5
+
+# Categorize the listings' supermarket convenience rating according to the distance from nearest supermarket
+listings[listings$host_response_rate < (minRate+bins) & !is.na(listings$host_response_rate), "response_rating"] = 1
+listings[listings$host_response_rate >= (minRate+bins) & listings$host_response_rate & !is.na(listings$host_response_rate) < (minRate+bins*2), "response_rating"] = 2
+listings[listings$host_response_rate >= (minRate+bins*2) & !is.na(listings$host_response_rate) & listings$host_response_rate < (minRate+bins*3), "response_rating"] = 3
+listings[listings$host_response_rate >= (minRate+bins*3) & !is.na(listings$host_response_rate) & listings$host_response_rate < (minRate+bins*4), "response_rating"] = 4
+listings[listings$host_response_rate >= (minRate+bins*4) & !is.na(listings$host_response_rate), "response_rating"] = 5
+```
+
+
+```{r save}
+save(listings, file = "./Cleaned Dataset/listings.Rda")
+```
+
+
+
+
+
+
